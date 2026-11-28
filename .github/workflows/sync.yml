@@ -1,0 +1,37 @@
+name: Sync Google reviews
+
+on:
+  schedule:
+    - cron: '17 10 * * *' # once a day, early morning in Missouri
+  workflow_dispatch: # the "Run workflow" button, for the first run and for testing
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 sync.py
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          # Optional: a key per store. A store without its own key uses the one above.
+          GOOGLE_API_KEY_1: ${{ secrets.GOOGLE_API_KEY_1 }}
+          GOOGLE_API_KEY_2: ${{ secrets.GOOGLE_API_KEY_2 }}
+      # Yesterday's sync commit is replaced rather than added to, so the repository holds
+      # today's reviews only and no history of old ones. Commits made by people are left alone.
+      - run: |
+          git config user.name "reviews-sync"
+          git config user.email "reviews-sync@users.noreply.github.com"
+          git add reviews.json
+          # A second run on the same day can leave the file as it was: nothing to commit, not a failure.
+          if git diff --cached --quiet; then exit 0; fi
+          if [ "$(git log -1 --pretty=%an)" = "reviews-sync" ]; then
+            git commit --amend --no-edit --date=now
+          else
+            git commit -m "Sync reviews"
+          fi
+          git push --force
+      # jsDelivr keeps its copy for up to 12 hours. Refreshing it shows today's reviews straight away.
+      - run: curl -sS "https://purge.jsdelivr.net/gh/${{ github.repository }}@main/reviews.json" || true
